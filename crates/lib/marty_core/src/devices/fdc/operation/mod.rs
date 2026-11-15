@@ -47,6 +47,29 @@ pub(super) use write_data::WriteDataOperation;
 /// it provides a distinct pre-transfer phase until track position is modeled.
 pub(super) const FDC_SECTOR_SCAN_TIME_US: f64 = 100.0;
 
+/// Optional rotational latency model (ELKS_FDROT=<sectors per track>): the disk
+/// turns at 300 rpm and a command waits until its first sector comes under the head.
+static DISK_CLOCK_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(in crate::devices::fdc) fn advance_disk_clock(us: f64) {
+    use std::sync::atomic::Ordering;
+    let t = f64::from_bits(DISK_CLOCK_BITS.load(Ordering::Relaxed)) + us;
+    DISK_CLOCK_BITS.store(t.to_bits(), Ordering::Relaxed);
+}
+
+fn rotational_wait_us(sector: u8) -> Option<f64> {
+    use std::sync::atomic::Ordering;
+    let spt: f64 = std::env::var("ELKS_FDROT").ok()?.parse().ok()?;
+    const REV_US: f64 = 200_000.0;
+    let now = f64::from_bits(DISK_CLOCK_BITS.load(Ordering::Relaxed)) % REV_US;
+    let target = ((sector.max(1) - 1) as f64 % spt) * (REV_US / spt);
+    let mut wait = target - now;
+    if wait < 0.0 {
+        wait += REV_US;
+    }
+    Some(wait.max(FDC_SECTOR_SCAN_TIME_US))
+}
+
 use fluxfox::prelude::DiskChs;
 
 use crate::{
@@ -198,6 +221,9 @@ impl FdcOperationState {
 
         self.mode = FdcOperationMode::Scanning;
         self.next_mode = next_mode;
+        if let Some(w) = rotational_wait_us(self.current_chs.s()) {
+            self.scan_timeout_us = w;
+        }
         self.scan_accumulator = 0.0;
     }
 

@@ -2291,6 +2291,7 @@ impl FloppyController {
 
     /// Run the Floppy Drive Controller. Process running Operations.
     pub fn run(&mut self, dma: &mut dma::DMAController, bus: &mut BusInterface, us: f64) {
+        super::operation::advance_disk_clock(us);
         self.us_accumulator += us;
         self.data_interface.run(us, dma, bus);
         if self.in_dma && self.data_interface.active() {
