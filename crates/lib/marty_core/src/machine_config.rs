@@ -355,7 +355,7 @@ lazy_static! {
     /// This hashmap is used to permit certain CPUs to be swapped out in place of others.
     static ref COMPATIBLE_CPUS: MartyHashMap<CpuType, Vec<CpuType>> = {
         let mut m = MartyHashMap::default();
-        m.insert(CpuType::Intel8088, vec![CpuType::NecV20(Default::default())]);
+        m.insert(CpuType::Intel8088, vec![CpuType::NecV20(Default::default()), CpuType::Intel8086]);
         m.insert(CpuType::NecV20(Default::default()), vec![CpuType::Intel8088]);
         m
     };
@@ -410,7 +410,7 @@ impl Default for MachineDescriptor {
             open_bus_byte: 0xFF,
             cpu_type: CpuType::Intel8088,
             cpu_factor: ClockFactor::Divisor(3),
-            cpu_turbo_factor: ClockFactor::Divisor(1),
+            cpu_turbo_factor: ClockFactor::Divisor(2),
             bus_type: BusType::Isa8,
             bus_factor: ClockFactor::Divisor(1),
             timer_divisor: PIT_DIVISOR,
