@@ -35,6 +35,7 @@ mod cpu_test;
 mod emulator;
 
 mod run_benchmark;
+mod run_elks;
 mod run_headless;
 
 #[cfg(feature = "arduino_validator")]

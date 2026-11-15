@@ -72,6 +72,11 @@ pub fn run_benchmark(
     let exec_control = Rc::new(RefCell::new(ExecutionControl::new()));
     exec_control.borrow_mut().set_state(ExecutionState::Running);
 
+    if let Ok(fd) = std::env::var("ELKS_FD") {
+        crate::run_elks::run_elks(&mut machine, &exec_control, &fd);
+        return;
+    }
+
     let cycle_total;
     match config.emulator.benchmark.end_condition {
         BenchmarkEndCondition::Cycles => {
