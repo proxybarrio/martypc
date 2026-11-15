@@ -408,3 +408,8 @@ name = "jride"
     # The PCjr BIOS will only count up to 640K during POST.
     size = 0x98000
     wait_states = 0
+
+[[overlay]]
+name = "cpu_8086"
+    [overlay.cpu]
+    upgrade_type = "Intel8086"

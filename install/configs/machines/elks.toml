@@ -1,0 +1,32 @@
+[[machine]]
+name = "elks_xt"
+type = "Ibm5160"
+rom_set = "glabios_xt"
+speaker = false
+ppi_turbo = false
+overlays = [
+    "ibm_nec_fdc",
+    "floppy_720k:0",
+    "us_modelf_keyboard",
+    "ibm_cga",
+]
+    [machine.memory]
+    conventional.size = 0xA0000
+    conventional.wait_states = 0
+
+[[machine]]
+name = "elks_86"
+type = "Ibm5160"
+rom_set = "glabios_xt"
+speaker = false
+ppi_turbo = false
+overlays = [
+    "ibm_nec_fdc",
+    "floppy_720k:0",
+    "us_modelf_keyboard",
+    "ibm_cga",
+    "cpu_8086",
+]
+    [machine.memory]
+    conventional.size = 0xA0000
+    conventional.wait_states = 0
