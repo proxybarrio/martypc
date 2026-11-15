@@ -1520,6 +1520,12 @@ impl BusInterface {
     }
 
     pub fn process_keyboard_input(&mut self) {
+        if let Some(ppi) = &self.ppi {
+            // Like a real keyboard, hold the next scancode until the shift register is free.
+            if !ppi.keyboard_ready() {
+                return;
+            }
+        }
         if let Some(keyboard) = &mut self.keyboard {
             // Read a byte from the keyboard
             if let Some(kb_byte) = keyboard.recv_scancode() {

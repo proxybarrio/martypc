@@ -843,9 +843,22 @@ impl Ppi {
                     self.ksr_cleared = false;
                     self.kb_byte.update(byte);
                 }
+                else if std::env::var("ELKS_KBLOG").is_ok() {
+                    eprintln!("ELKS: keyboard byte {:02X} DROPPED (shift register not cleared: {}, enabled: {})",
+                        byte, !self.ksr_cleared, self.kb_enabled());
+                }
             }
 
             _ => {}
+        }
+    }
+
+    /// Whether the PC/XT keyboard shift register can take a new byte. A real keyboard holds
+    /// further scancodes in its own buffer until the register has been read and cleared.
+    pub fn keyboard_ready(&self) -> bool {
+        match self.machine_type {
+            MachineType::Ibm5150v64K | MachineType::Ibm5150v256K | MachineType::Ibm5160 => self.ksr_cleared,
+            _ => true,
         }
     }
 

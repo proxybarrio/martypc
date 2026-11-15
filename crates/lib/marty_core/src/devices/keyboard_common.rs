@@ -419,26 +419,19 @@ impl Keyboard {
 
     /// Send the corresponding scancodes to the keyboard buffer.
     pub fn send_scancodes(&mut self, keys: &[u8]) {
+        // Real keyboards (incl. the XT Model F) keep a small FIFO of scancodes that waits
+        // while the host has not yet read and cleared the previous one. Keep order, never
+        // overwrite a pending byte.
         if !keys.is_empty() {
-            if self.kb_buffer_size > 1 {
-                // We have a keyboard buffer
-                if self.kb_buffer.len() + keys.len() >= self.kb_buffer_size {
-                    // KB overflow!
-                    self.kb_buffer_overflow = true;
-                }
-            }
-            else if self.kb_buffer_size == 1 {
-                // No keyboard buffer (kb_buffer_size == 1). Just set one scancode.
-                self.kb_buffer.clear();
-                self.kb_buffer.push(keys[0]);
+            if self.kb_buffer.len() + keys.len() > self.kb_buffer_size.max(16) {
+                self.kb_buffer_overflow = true;
             }
             else {
-                panic!("invalid kb_buffer_size");
+                self.kb_buffer.extend_from_slice(keys);
             }
         }
     }
 
-    /// Read out a scancode from the keyboard or None if no key in buffer.
     pub fn recv_scancode(&mut self) -> Option<u8> {
         // Prioritize reset buffer over keyboard buffer.
         if !self.reset_buffer.is_empty() {
@@ -450,8 +443,11 @@ impl Keyboard {
             self.kb_buffer_overflow = false;
             Some(0xFF)
         }
+        else if self.kb_buffer.is_empty() {
+            None
+        }
         else {
-            self.kb_buffer.pop()
+            Some(self.kb_buffer.remove(0))
         }
     }
 
