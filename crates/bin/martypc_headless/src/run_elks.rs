@@ -17,7 +17,8 @@ fn key_for(c: char) -> Option<(bool, MartyKey)> {
         '7'=>Digit7,'8'=>Digit8,'9'=>Digit9,' '=>Space,'/'=>Slash,'-'=>Minus,'.'=>Period,
         '='=>Equal,';'=>Semicolon,',' =>Comma,
         '>'=>return Some((true, Period)),'|'=>return Some((true, Backslash)),
-        '&'=>return Some((true, Digit7)),'*'=>return Some((true, Digit8)),'_'=>return Some((true, Minus)),
+        '&'=>return Some((true, Digit7)),'('=>return Some((true, Digit9)),')'=>return Some((true, Digit0)),
+        '$'=>return Some((true, Digit4)),'"'=>return Some((true, Quote)),'\''=>Quote,'<'=>return Some((true, Comma)),'*'=>return Some((true, Digit8)),'_'=>return Some((true, Minus)),
         _=>return Option::None };
     Some((c.is_ascii_uppercase(), k))
 }
@@ -94,7 +95,10 @@ pub fn run_elks(machine: &mut Machine, ec: &Rc<RefCell<ExecutionControl>>, fd: &
                     println!("ELKS: boot to prompt {} cycles = {:.3} s", now - start, (now - start) as f64 / (mhz * 1e6));
                     for l in &scr { if l.starts_with("Kernel text") { println!("ELKS: {}", l); } }
                 }
-                if idx >= cmds.len() { break; }
+                if idx >= cmds.len() {
+                    if std::env::var("ELKS_SCREEN").is_ok() { for l in &scr { println!("SCR|{}", l); } }
+                    break;
+                }
                 if let Some(secs) = cmds[idx].strip_prefix("@idle ") {
                     // sit at the prompt, sampling, for the given virtual seconds
                     let secs: f64 = secs.trim().parse().unwrap_or(5.0);
