@@ -150,6 +150,15 @@ pub fn run_elks(machine: &mut Machine, ec: &Rc<RefCell<ExecutionControl>>, fd: &
             break;
         }
         let scr = screen(machine); let last = last_line(&scr);
+        // ELKS_BOOT_TEXT=<text>: stop at the first screen line ending with it
+        // (for example "login:"), reporting the boot time, for boots that
+        // do not end at a shell prompt
+        if let Ok(t) = std::env::var("ELKS_BOOT_TEXT") {
+            if !t.is_empty() && scr.iter().any(|l| l.ends_with(t.as_str())) {
+                println!("ELKS: boot to '{}' {} cycles = {:.3} s", t, now - start, (now - start) as f64 / (mhz * 1e6));
+                break;
+            }
+        }
         match state {
             0 => if last == "#" {
                 if idx == 0 && !booted {

@@ -224,6 +224,13 @@ impl FdcOperationState {
         if let Some(w) = rotational_wait_us(self.current_chs.s()) {
             self.scan_timeout_us = w;
         }
+        // ELKS_FDTRACE=1: one line per command (measurement only)
+        if std::env::var("ELKS_FDTRACE").is_ok() {
+            use std::sync::atomic::Ordering;
+            let t = f64::from_bits(DISK_CLOCK_BITS.load(Ordering::Relaxed));
+            println!("FDTRACE t={:.0}us chs={}/{}/{} wait={:.0}us", t, self.current_chs.c(), self.current_chs.h(),
+                self.current_chs.s(), self.scan_timeout_us);
+        }
         self.scan_accumulator = 0.0;
     }
 
