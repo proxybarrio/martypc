@@ -561,6 +561,11 @@ impl Pic {
         Some(SPURIOUS_INTERRUPT)
     }
 
+    /// In-service register, for latency measurements (read only).
+    pub fn isr(&self) -> u8 {
+        self.isr
+    }
+
     pub fn get_string_state(&self) -> PicStringState {
         let mut state = PicStringState {
             imr: format!("{:08b}", self.imr),

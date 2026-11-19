@@ -59,8 +59,70 @@ pub fn run_elks(machine: &mut Machine, ec: &Rc<RefCell<ExecutionControl>>, fd: &
     let sample: u32 = std::env::var("ELKS_SAMPLE").ok().and_then(|v| v.parse().ok()).unwrap_or(97);
     let prof_from: usize = std::env::var("ELKS_PROF_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
     println!("ELKS: cpu {:.4} MHz", mhz);
+    // Interrupt latency meter: ELKS_IRQOFF=<step cycles>. While commands run,
+    // measures the longest stretch with IF=0 and the longest stretch in which
+    // IRQ 4 (COM1) could not be taken: IF=0, or IRQ 0-4 in service at the PIC
+    // (ELKS_IRQOFF_MASK, hex, default 1f: in-service bits that count as blocking).
+    let irqoff: u32 = std::env::var("ELKS_IRQOFF").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let isr_mask: u8 = std::env::var("ELKS_IRQOFF_MASK").ok().and_then(|v| u8::from_str_radix(v.trim_start_matches("0x"), 16).ok()).unwrap_or(0x1F);
+    let thr: u64 = std::env::var("ELKS_IRQOFF_THR").ok().and_then(|v| v.parse().ok()).unwrap_or(2480);
+    let (mut if0_t, mut blk_t) = (0u64, 0u64);              // start of current stretch, 0 = none
+    let (mut if0_at, mut blk_at) = (0u64, 0u64);            // CS:IP at start of current stretch
+    let mut if0_max: (u64, u64, u64) = (0, 0, 0);           // (cycles, start cs:ip, end cs:ip)
+    let mut blk_max: (u64, u64, u64) = (0, 0, 0);
+    let (mut if0_n, mut blk_n) = (0u64, 0u64);              // stretches longer than thr
+    let mut blk_hist: HashMap<u64, (u64, u64)> = HashMap::new(); // start cs:ip -> (count over thr, max)
+    let mut cur_where: HashMap<u64, u64> = HashMap::new();  // cs:ip samples in the current IF=0 stretch
+    let mut where_hist: HashMap<u64, u64> = HashMap::new(); // cs:ip samples in IF=0 stretches over thr
+    let mut isr_at = 0u8;
+    let mut cur_bwhere: HashMap<u64, u64> = HashMap::new();
+    let mut bwhere_hist: HashMap<u64, u64> = HashMap::new();
+    let mut bisr_or = 0u8;
+    let mut bios_seen = false;
+    let mut len_hist: HashMap<(u64, bool), u64> = HashMap::new(); // (length/128, BIOS code seen) -> count
     loop {
-        if prof_path.is_some() && ((state == 2 && idx >= prof_from) || (!booted && std::env::var("ELKS_PROF_BOOT").is_ok())) {
+        if irqoff > 0 && state == 2 {
+            let end = machine.cpu_cycles() + 20_000;
+            while machine.cpu_cycles() < end {
+                machine.run(irqoff, &mut ec.borrow_mut());
+                let now = machine.cpu_cycles();
+                let csip = machine.cpu().flat_ip() as u64 | ((machine.cpu().get_register16(Register16::CS) as u64) << 20);
+                let ifl = machine.cpu().get_flags() & 0x0200 != 0;
+                let isr = machine.bus().pic().as_ref().map(|p| p.isr()).unwrap_or(0);
+                let blocked = !ifl || (isr & isr_mask) != 0;
+                if !ifl {
+                    if if0_t == 0 { if0_t = now; if0_at = csip; cur_where.clear(); isr_at = isr; }
+                    *cur_where.entry(csip >> 4 << 4).or_insert(0) += 1;
+                }
+                else if if0_t != 0 {
+                    let d = now - if0_t;
+                    if d > if0_max.0 { if0_max = (d, if0_at, csip); println!("ELKS: irqoff   new IF=0 max {} isr at start {:08b}", d, isr_at); }
+                    if d > thr {
+                        if0_n += 1;
+                        for (k, v) in cur_where.iter() { *where_hist.entry(*k).or_insert(0) += v; }
+                    }
+                    if0_t = 0;
+                }
+                if blocked {
+                    if blk_t == 0 { blk_t = now; blk_at = csip; cur_bwhere.clear(); bisr_or = 0; bios_seen = false; }
+                    if (csip >> 20) >= 0xF000 { bios_seen = true; }
+                    *cur_bwhere.entry(csip >> 4 << 4).or_insert(0) += 1;
+                    bisr_or |= isr;
+                }
+                else if blk_t != 0 {
+                    let d = now - blk_t;
+                    if d >= 1024 { *len_hist.entry((d / 256, bios_seen)).or_insert(0) += 1; }
+                    if d > blk_max.0 { blk_max = (d, blk_at, csip); }
+                    if d > thr {
+                        blk_n += 1;
+                        let e = blk_hist.entry(blk_at | ((bisr_or as u64) << 40)).or_insert((0, 0));
+                        e.0 += 1; if d > e.1 { e.1 = d; }
+                        for (k, v) in cur_bwhere.iter() { *bwhere_hist.entry(*k).or_insert(0) += v; }
+                    }
+                    blk_t = 0;
+                }
+            }
+        } else if prof_path.is_some() && ((state == 2 && idx >= prof_from) || (!booted && std::env::var("ELKS_PROF_BOOT").is_ok())) {
             for _ in 0..206 {
                 machine.run(sample, &mut ec.borrow_mut());
                 let cs = machine.cpu().get_register16(Register16::CS);
@@ -130,6 +192,28 @@ pub fn run_elks(machine: &mut Machine, ec: &Rc<RefCell<ExecutionControl>>, fd: &
                 if last == "#" && seen_busy {
                     let c = now - t0;
                     println!("ELKS: cmd [{}] {} cycles = {:.3} s", cmds[idx], c, c as f64 / (mhz * 1e6));
+                    if irqoff > 0 {
+                        let f = |v: u64| format!("{:04x}:{:04x}", v >> 20, (v & 0xFFFFF).wrapping_sub((v >> 20) << 4) & 0xFFFF);
+                        println!("ELKS: irqoff [{}] IF=0 max {} cycles ({} -> {}), {} over {}; IRQ4 blocked max {} cycles ({} -> {}), {} over {}",
+                            cmds[idx], if0_max.0, f(if0_max.1), f(if0_max.2), if0_n, thr,
+                            blk_max.0, f(blk_max.1), f(blk_max.2), blk_n, thr);
+                        let mut v: Vec<_> = blk_hist.iter().collect();
+                        v.sort_by(|a, b| b.1.1.cmp(&a.1.1));
+                        for (a, (n, m)) in v.iter().take(8) { println!("ELKS: irqoff   from {} isr {:08b} count {} max {}", f(**a & 0xFFFFFFFFFF), (**a >> 40) as u8, n, m); }
+                        let mut w: Vec<_> = bwhere_hist.iter().collect();
+                        w.sort_by(|a, b| b.1.cmp(a.1));
+                        for (a, n) in w.iter().take(12) { println!("ELKS: irqoff   blocked time at {} samples {}", f(**a), n); }
+                        bwhere_hist.clear();
+                        let mut h: Vec<_> = len_hist.iter().collect();
+                        h.sort();
+                        for ((b, bios), n) in h { println!("ELKS: irqoff   blocked {}-{} cycles{}: {}", b * 256, b * 256 + 255, if *bios { " (BIOS code)" } else { "" }, n); }
+                        len_hist.clear();
+                        let mut w: Vec<_> = where_hist.iter().collect();
+                        w.sort_by(|a, b| b.1.cmp(a.1));
+                        for (a, n) in w.iter().take(10) { println!("ELKS: irqoff   IF=0 time at {} (16-byte bin) samples {}", f(**a), n); }
+                        where_hist.clear();
+                        if0_max = (0, 0, 0); blk_max = (0, 0, 0); if0_n = 0; blk_n = 0; blk_hist.clear();
+                    }
                     idx += 1; state = 0;
                 }
             }
